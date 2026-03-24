@@ -1,0 +1,10 @@
+{
+  "name": "line-coupon-bot",
+  "version": "1.0.0",
+  "main": "api/webhook.js",
+  "dependencies": {
+    "@line/bot-sdk": "^9.5.1",
+    "google-spreadsheet": "^4.1.4",
+    "google-auth-library": "^9.15.0"
+  }
+}
