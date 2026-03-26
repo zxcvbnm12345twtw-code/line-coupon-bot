@@ -51,7 +51,7 @@ async function handleEvent(event, req) {
         type: "bubble",
         hero: {
           type: "image",
-          url: "https://images.unsplash.com/photo-1556740734-7f95837965bb?q=80&w=1000&auto=format&fit=crop",
+          url: "https://cdn-next.cybassets.com/media/W1siZiIsIjMyODYwL2F0dGFjaGVkX3Bob3Rvcy8xNzc0NTEwNjE1Xzc3LmpwZy5qcGVnIl1d.jpeg?sha=2aededbc8c3b1a6a",
           size: "full",
           aspectRatio: "20:13",
           aspectMode: "cover"
