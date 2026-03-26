@@ -2,7 +2,7 @@ const { Client } = require('@line/bot-sdk');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 
-// 1. 配置 (由環境變數讀取)
+// 1. 基本配置
 const config = {
   channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.LINE_CHANNEL_SECRET,
@@ -16,13 +16,13 @@ const serviceAccountAuth = new JWT({
 });
 const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID, serviceAccountAuth);
 
-// --- 門市與 LINE 受眾 ID 對應表 (已填入你提供的 ID) ---
-const audienceMap = {
-  'B011': '4010389253318', // 泰山門市
-  'B013': '3692460220204', // 淡水門市
-  'B014': '7710570789694', // 板橋門市
-  'B015': '3748249875490', // 鶯歌門市
-  'B016': '5311517315589'  // 深坑門市
+// --- 門市資料對照表 ---
+const storeConfig = {
+  'B011': { name: '泰山明志店', audienceId: '4010389253318' },
+  'B013': { name: '淡水中正店', audienceId: '3692460220204' },
+  'B014': { name: '板橋北門店', audienceId: '7710570789694' },
+  'B015': { name: '鶯歌國慶店', audienceId: '3748249875490' },
+  'B016': { name: '深坑老街店', audienceId: '5311517315589' }
 };
 
 // 2. Webhook 入口
@@ -34,12 +34,13 @@ export default async function handler(req, res) {
     return res.status(200).send('OK');
   } catch (err) {
     console.error('Webhook Error:', err);
-    return res.status(500).send('Internal Server Error');
+    return res.status(500).send('Internal Error');
   }
 }
 
 async function handleEvent(event, req) {
   const userId = event.source.userId;
+  const host = req.headers.host;
 
   // --- 處理：加入好友/封鎖重加 (Follow) ---
   if (event.type === 'follow') {
@@ -69,13 +70,12 @@ async function handleEvent(event, req) {
           type: "box",
           layout: "vertical",
           spacing: "sm",
-          contents: [
-            { type: "button", style: "primary", color: "#1DB446", action: { type: "message", label: "泰山明志店", text: "B011" } },
-            { type: "button", style: "primary", color: "#1DB446", action: { type: "message", label: "淡水中正店", text: "B013" } },
-            { type: "button", style: "primary", color: "#1DB446", action: { type: "message", label: "板橋北門店", text: "B014" } },
-            { type: "button", style: "primary", color: "#1DB446", action: { type: "message", label: "鶯歌國慶店", text: "B015" } },
-            { type: "button", style: "primary", color: "#1DB446", action: { type: "message", label: "深坑老街店", text: "B016" } }
-          ]
+          contents: Object.keys(storeConfig).map(id => ({
+            type: "button",
+            style: "primary",
+            color: "#1DB446",
+            action: { type: "message", label: storeConfig[id].name, text: id }
+          }))
         }
       }
     });
@@ -84,21 +84,20 @@ async function handleEvent(event, req) {
   // --- 處理：文字訊息 (Message) ---
   if (event.type === 'message' && event.message.type === 'text') {
     const storeId = event.message.text.trim().toUpperCase();
-    const validStores = Object.keys(audienceMap);
+    
+    // 如果輸入的不是有效的門市代碼就直接結束
+    if (!storeConfig[storeId]) return;
 
-    // 如果不是門市代碼就結束
-    if (!validStores.includes(storeId)) return;
-
-    // A. 抓取暱稱
+    // A. 抓取用戶暱稱
     let userName = '未知用戶';
     try {
       const profile = await client.getProfile(userId);
       userName = profile.displayName;
-    } catch (e) { console.error('Fetch Profile Error:', e); }
+    } catch (e) { console.error('Profile Error:', e); }
 
     // B. 自動加入 LINE 受眾 (Audience API)
     try {
-      const audienceId = audienceMap[storeId];
+      const audienceId = storeConfig[storeId].audienceId;
       await fetch('https://api.line.me/v2/bot/audienceGroup/upload', {
         method: 'POST',
         headers: {
@@ -112,39 +111,45 @@ async function handleEvent(event, req) {
       });
     } catch (apiErr) { console.error('Audience API Error:', apiErr); }
 
-    // C. Google Sheets 操作
+    // C. Google Sheets 資料操作
     await doc.loadInfo();
     const logSheet = doc.sheetsByTitle['user_log'];
     const couponSheet = doc.sheetsByTitle['coupon_pool'];
     const logRows = await logSheet.getRows();
+    
+    // 檢查此用戶是否已經在 log 中有紀錄
     const hasClaimed = logRows.find(row => row.get('user_id') === userId);
-    const host = req.headers.host;
 
-    // D. 判斷是否重複領取
     if (hasClaimed) {
       const oldCode = hasClaimed.get('coupon_code');
       const isUsed = hasClaimed.get('is_redeemed') === 'YES';
+      const claimedStoreId = hasClaimed.get('store_id');
+      const redeemedTime = hasClaimed.get('redeemed_at') || '時間不詳';
       
+      const storeName = storeConfig[claimedStoreId] ? storeConfig[claimedStoreId].name : claimedStoreId;
+
       let resText = `您已領取過囉！\n您的折扣碼：${oldCode}`;
+      
       if (isUsed) {
-        resText += `\n(此券已於 ${hasClaimed.get('redeemed_at')} 核銷完畢)`;
+        // 修復後的已核銷訊息
+        resText += `\n\n(此券已於 ${redeemedTime} \n在 【${storeName}】 核銷完畢)`;
       } else {
-        resText += `\n\n⚠️ 店員核銷專用連結：\nhttps://${host}/api/redeem?code=${oldCode}`;
+        resText += `\n\n門市：${storeName}\n\n⚠️ 店員核銷專用連結：\nhttps://${host}/api/redeem?code=${oldCode}`;
       }
       return client.replyMessage(event.replyToken, { type: 'text', text: resText });
     }
 
-    // E. 從 Pool 抓取序號
+    // D. 領取新序號邏輯
     const couponRows = await couponSheet.getRows();
     const availableCoupon = couponRows.find(row => row.get('status') === 'unused');
 
     if (!availableCoupon) {
-      return client.replyMessage(event.replyToken, { type: 'text', text: '抱歉，目前的優惠券已全數領完。' });
+      return client.replyMessage(event.replyToken, { type: 'text', text: '抱歉，目前的優惠券已全數領完，請洽現場人員。' });
     }
 
     const couponCode = availableCoupon.get('code');
 
-    // F. 更新 Pool & 寫入 Log
+    // E. 更新資料至 Google Sheets
     availableCoupon.set('status', 'assigned');
     availableCoupon.set('user_id', userId);
     availableCoupon.set('assigned_at', new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }));
@@ -156,13 +161,14 @@ async function handleEvent(event, req) {
       store_id: storeId,
       coupon_code: couponCode,
       timestamp: new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }),
-      is_redeemed: 'NO'
+      is_redeemed: 'NO',
+      redeemed_at: '' // 初始化為空，防止讀取時出錯
     });
 
-    // G. 回傳成功與核銷連結
+    // F. 回傳領券成功訊息
     return client.replyMessage(event.replyToken, {
       type: 'text',
-      text: `已為您登記門市 ${storeId}\n您的專屬優惠碼為：${couponCode}\n\n請出示給門市人員進行核銷。\n\n⚠️ 店員核銷專用連結：\nhttps://${host}/api/redeem?code=${couponCode}`
+      text: `已為您登記門市 ${storeConfig[storeId].name}\n您的專屬優惠碼為：${couponCode}\n\n請出示給門市人員進行核銷。\n\n⚠️ 店員核銷專用連結：\nhttps://${host}/api/redeem?code=${couponCode}`
     });
   }
 }
