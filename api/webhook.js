@@ -166,14 +166,15 @@ async function handleEvent(event, req) {
     });
 
     // F. 回傳領券成功訊息
-    return client.replyMessage(event.replyToken, {
-text:
-  `已為您登記門市 ${storeConfig[storeId].name}\n` +
-  `您的專屬優惠碼為：${couponCode}\n\n` +
-  `請出示給門市人員進行核銷。\n\n` +
-  `⚠️ 此優惠碼僅適用於實體門市消費\n` +
-  `線上官網商店恕不適用。\n\n` +
-  `店員核銷專用連結：\nhttps://${host}/api/redeem?code=${couponCode}`
+return client.replyMessage(event.replyToken, {
+  type: 'text',
+  text:
+    `已為您登記門市 ${storeConfig[storeId].name}\n` +
+    `您的專屬優惠碼為：${couponCode}\n\n` +
+    `請出示給門市人員進行核銷。\n\n` +
+    `⚠️ 此優惠碼僅適用於實體門市消費\n` +
+    `線上官網商店恕不適用。\n\n` +
+    `店員核銷專用連結：\nhttps://${host}/api/redeem?code=${couponCode}`
     });
   }
 }
